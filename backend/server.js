@@ -8,7 +8,7 @@ import { BrowserManager } from './browserManager.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT) || 3001;
 const manager = new BrowserManager({
-  jpegQuality: Number(process.env.JPEG_QUALITY) || 55,
+  screencastQuality: Number(process.env.SCREENCAST_QUALITY) || 75,
   headless: process.env.HEADLESS !== 'false'
 });
 

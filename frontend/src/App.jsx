@@ -43,7 +43,7 @@ export default function App() {
       const generation = frameGenerationRef.current;
       pendingFrameRef.current = null;
       decodingFrameRef.current = true;
-      const bitmap = await createImageBitmap(new Blob([image], { type: 'image/jpeg' })).catch(() => null);
+      const bitmap = await createImageBitmap(new Blob([image], { type: 'image/webp' })).catch(() => null);
       if (bitmap) {
         const canvas = canvasRef.current;
         const context = canvas?.getContext('2d');

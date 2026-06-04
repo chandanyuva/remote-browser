@@ -27,6 +27,6 @@ Copy `.env.example` values into your environment as needed:
 
 - `PORT`: backend port, default `3001`
 - `HEADLESS`: set to `false` to see the backend browser
-- `JPEG_QUALITY`: screencast JPEG quality from 0–100, default `55`
+- `SCREENCAST_QUALITY`: WebP encoding quality (and CDP JPEG source quality) from 0–100, default `75`
 
 The prototype supports one active browser session. Closing the frontend also closes its backend browser session.

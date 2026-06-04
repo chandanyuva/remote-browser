@@ -415,3 +415,66 @@ It is:
 * intended for router labs and automation environments
 
 Keep the architecture simple and focused.
+
+---
+
+# Stream Optimization Backlog
+
+## Frame Deduplication (highest impact)
+
+Router UIs are mostly static (forms, tables, menus). Currently *every* CDP frame is processed and sent even if the page hasn't changed.
+
+**Approach:** Compare consecutive frames — skip encoding/sending when the page is identical.
+
+Options for comparison:
+- **Perceptual hash (pHash):** Compute a hash of each frame, skip if hash matches previous. Fast, immune to minor JPEG noise changes.
+- **Block-level pixel diff:** Downscale frame to e.g. 16×16, compare average channel values per block.
+- **CDP metadata:** Check `metadata.pageScaleFactor`, `metadata.deviceWidth`, `metadata.scrollOffsetX/Y` — if none of these changed, the frame may be redundant.
+
+With a static router page, this should drop 90%+ of frames.
+
+**Implementation notes:**
+- Track the last-sent WebP buffer or a hash of it
+- On new frame, compare hash before encoding; skip if identical
+- Optionally send a "frame-skipped" event so the frontend controls (like the frame indicator) stay accurate
+
+## Sharp Encoder Tuning
+
+Current default `effort: 4` is balanced for file size vs speed. For real-time streaming, `effort: 0` is preferred:
+
+```js
+.webp({ quality: this.screencastQuality, effort: 0 })
+```
+
+| `effort` | Encode speed | File size vs `effort: 6` |
+|----------|-------------|--------------------------|
+| 0 | ~3-5x faster | +10-15% |
+| 4 (default) | baseline | baseline |
+| 6 | ~2x slower | -5-10% |
+
+For router UIs at 1-5 fps, `effort: 0` keeps CPU low with negligible size penalty.
+
+## Frame Throttling via CDP
+
+Current `everyNthFrame: 1` captures every compositor frame. Router UIs don't need high frame rates — `everyNthFrame: 2` or `3` halves/triples the frame pipeline throughput:
+
+```js
+everyNthFrame: 2   // ~15 fps max → ~7-8 fps
+```
+
+This directly reduces:
+- CDP encoding work in Chromium
+- WebP transcoding on the backend
+- Socket.IO messages sent to frontend
+- Canvas decode/draw cycles in the browser
+
+## Adaptive CDP Source Quality
+
+Since CDP JPEG is an intermediate source (transcoded to WebP before reaching the frontend), its quality can be lowered independently:
+
+```js
+format: 'jpeg',
+quality: 50,   // lower source quality; WebP handles the final visual
+```
+
+This reduces CDP→Node transfer size and sharp decode time with no visible difference to the user (WebP compression hides the source artifacts).

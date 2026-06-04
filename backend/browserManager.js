@@ -1,10 +1,11 @@
 import { chromium } from 'playwright';
+import sharp from 'sharp';
 
 const VIEWPORT = { width: 1280, height: 720 };
 
 export class BrowserManager {
-  constructor({ jpegQuality = 55, headless = true } = {}) {
-    this.jpegQuality = jpegQuality;
+  constructor({ screencastQuality = 75, headless = true } = {}) {
+    this.screencastQuality = screencastQuality;
     this.headless = headless;
     this.browser = null;
     this.context = null;
@@ -139,14 +140,21 @@ export class BrowserManager {
 
     const cdpSession = await this.context.newCDPSession(this.page);
     this.cdpSession = cdpSession;
-    this.screencastFrameHandler = ({ data, metadata, sessionId }) => {
+    this.screencastFrameHandler = async ({ data, metadata, sessionId }) => {
       cdpSession.send('Page.screencastFrameAck', { sessionId }).catch(() => {});
-      onFrame(Buffer.from(data, 'base64'), metadata);
+      try {
+        const webp = await sharp(Buffer.from(data, 'base64'))
+          .webp({ quality: this.screencastQuality })
+          .toBuffer();
+        onFrame(webp, metadata);
+      } catch {
+        onFrame(Buffer.from(data, 'base64'), metadata);
+      }
     };
     cdpSession.on('Page.screencastFrame', this.screencastFrameHandler);
     await cdpSession.send('Page.startScreencast', {
       format: 'jpeg',
-      quality: this.jpegQuality,
+      quality: this.screencastQuality,
       maxWidth: VIEWPORT.width,
       maxHeight: VIEWPORT.height,
       everyNthFrame: 1
