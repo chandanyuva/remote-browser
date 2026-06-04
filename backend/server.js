@@ -58,6 +58,9 @@ io.on('connection', (socket) => {
   });
 
   socket.on('mouse-click', ({ x, y } = {}) => handle(socket, () => manager.click(socket.id, x, y)));
+  socket.on('mouse-wheel', ({ deltaX, deltaY } = {}) =>
+    handle(socket, () => manager.wheel(socket.id, deltaX, deltaY))
+  );
   socket.on('mouse-move', ({ x, y } = {}) =>
     handle(socket, async () => {
       const cursor = await manager.move(socket.id, x, y);

@@ -136,6 +136,11 @@ export default function App() {
     });
   }
 
+  function sendScroll(event) {
+    if (!ownsSession) return;
+    socket.emit('mouse-wheel', { deltaX: event.deltaX, deltaY: event.deltaY });
+  }
+
   function sendKey(event, type) {
     if (!ownsSession) return;
     event.preventDefault();
@@ -202,6 +207,7 @@ export default function App() {
                 tabIndex={0}
                 onClick={sendClick}
                 onMouseMove={sendMove}
+                onWheel={sendScroll}
                 onKeyDown={(event) => sendKey(event, 'keydown')}
                 onKeyUp={(event) => sendKey(event, 'keyup')}
               />

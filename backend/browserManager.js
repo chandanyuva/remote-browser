@@ -86,6 +86,10 @@ export class BrowserManager {
     return this.cursorAtPoint(page, point);
   }
 
+  async wheel(ownerId, deltaX, deltaY) {
+    await this.getOwnedPage(ownerId).mouse.wheel(deltaX, deltaY);
+  }
+
   async keyDown(ownerId, key) {
     await this.getOwnedPage(ownerId).keyboard.down(normalizeKey(key));
   }
