@@ -1,0 +1,26 @@
+{
+  "name": "remote-router-browser",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n backend,frontend -c blue,green \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "node --watch backend/server.js",
+    "dev:frontend": "vite --host 0.0.0.0",
+    "start": "node backend/server.js",
+    "build": "vite build",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "^4.4.1",
+    "concurrently": "^9.1.2",
+    "express": "^5.1.0",
+    "playwright": "^1.52.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
+    "socket.io": "^4.8.1",
+    "socket.io-client": "^4.8.1",
+    "vite": "^6.3.5"
+  },
+  "devDependencies": {}
+}
