@@ -77,7 +77,12 @@ export class BrowserManager {
 
   async move(ownerId, x, y) {
     const page = this.getOwnedPage(ownerId);
-    await page.mouse.move(clamp(x, 0, VIEWPORT.width), clamp(y, 0, VIEWPORT.height));
+    const point = {
+      x: clamp(x, 0, VIEWPORT.width),
+      y: clamp(y, 0, VIEWPORT.height)
+    };
+    await page.mouse.move(point.x, point.y);
+    return this.cursorAtPoint(page, point);
   }
 
   async keyDown(ownerId, key) {
@@ -108,6 +113,24 @@ export class BrowserManager {
     if (!this.page) throw new Error('No active browser session.');
     if (this.ownerId !== ownerId) throw new Error('This session belongs to another client.');
     return this.page;
+  }
+
+  async cursorAtPoint(page, point) {
+    const frames = page.frames().slice(1).reverse();
+    for (const frame of frames) {
+      const frameElement = await frame.frameElement().catch(() => null);
+      const box = await frameElement?.boundingBox().catch(() => null);
+      await frameElement?.dispose().catch(() => {});
+      if (!box || !containsPoint(box, point)) continue;
+
+      const cursor = await cursorInFrame(frame, {
+        x: point.x - box.x,
+        y: point.y - box.y
+      });
+      return normalizeCursor(cursor);
+    }
+
+    return normalizeCursor(await cursorInFrame(page.mainFrame(), point));
   }
 
   async startFrames(onFrame) {
@@ -187,4 +210,36 @@ function normalizeKey(key) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(Number(value) || 0, min), max);
+}
+
+function containsPoint(box, point) {
+  return point.x >= box.x && point.x <= box.x + box.width
+    && point.y >= box.y && point.y <= box.y + box.height;
+}
+
+async function cursorInFrame(frame, point) {
+  return frame.evaluate(({ x, y }) => {
+    const element = document.elementFromPoint(x, y);
+    if (!element) return 'default';
+
+    const computedCursor = getComputedStyle(element).cursor;
+    if (computedCursor !== 'auto') return computedCursor;
+
+    const editable = element.closest('input, textarea, [contenteditable]:not([contenteditable="false"])');
+    if (editable && !editable.disabled) return 'text';
+    if (element.closest('a[href], area[href]')) return 'pointer';
+    return 'default';
+  }, point).catch(() => 'default');
+}
+
+function normalizeCursor(cursor) {
+  const allowed = new Set([
+    'alias', 'all-scroll', 'auto', 'cell', 'col-resize', 'context-menu', 'copy',
+    'crosshair', 'default', 'e-resize', 'ew-resize', 'grab', 'grabbing', 'help',
+    'move', 'n-resize', 'ne-resize', 'nesw-resize', 'no-drop', 'none',
+    'not-allowed', 'ns-resize', 'nw-resize', 'nwse-resize', 'pointer', 'progress',
+    'row-resize', 's-resize', 'se-resize', 'sw-resize', 'text', 'vertical-text',
+    'w-resize', 'wait', 'zoom-in', 'zoom-out'
+  ]);
+  return allowed.has(cursor) ? cursor : 'default';
 }

@@ -9,12 +9,15 @@ export default function App() {
   const [url, setUrl] = useState('http://192.168.1.1');
   const [pageStatus, setPageStatus] = useState({ title: '', url: '' });
   const [hasFrame, setHasFrame] = useState(false);
+  const [cursor, setCursor] = useState('default');
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
   const canvasRef = useRef(null);
   const frameGenerationRef = useRef(0);
   const pendingFrameRef = useRef(null);
   const decodingFrameRef = useRef(false);
+  const pendingMoveRef = useRef(null);
+  const moveFrameRef = useRef(null);
 
   const ownsSession = session.active && session.ownerId === socket.id;
 
@@ -29,6 +32,7 @@ export default function App() {
       setStarting(false);
       if (!next.active) {
         setPageStatus({ title: '', url: '' });
+        setCursor('default');
         clearFrame();
       }
     };
@@ -65,9 +69,11 @@ export default function App() {
       setError(message);
       setStarting(false);
     };
+    const onCursorStyle = (nextCursor) => setCursor(nextCursor || 'default');
     const clearFrame = () => {
       frameGenerationRef.current += 1;
       pendingFrameRef.current = null;
+      if (moveFrameRef.current) cancelAnimationFrame(moveFrameRef.current);
       const canvas = canvasRef.current;
       canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
       setHasFrame(false);
@@ -79,6 +85,7 @@ export default function App() {
     socket.on('frame', onFrame);
     socket.on('page-status', onPageStatus);
     socket.on('error-message', onError);
+    socket.on('cursor-style', onCursorStyle);
 
     return () => {
       socket.off('connect', onConnect);
@@ -87,6 +94,7 @@ export default function App() {
       socket.off('frame', onFrame);
       socket.off('page-status', onPageStatus);
       socket.off('error-message', onError);
+      socket.off('cursor-style', onCursorStyle);
       frameGenerationRef.current += 1;
       pendingFrameRef.current = null;
     };
@@ -119,7 +127,13 @@ export default function App() {
 
   function sendMove(event) {
     if (!ownsSession) return;
-    socket.volatile.emit('mouse-move', coordinates(event));
+    pendingMoveRef.current = coordinates(event);
+    if (moveFrameRef.current) return;
+
+    moveFrameRef.current = requestAnimationFrame(() => {
+      socket.volatile.emit('mouse-move', pendingMoveRef.current);
+      moveFrameRef.current = null;
+    });
   }
 
   function sendKey(event, type) {
@@ -184,6 +198,7 @@ export default function App() {
                 width={session.viewport.width}
                 height={session.viewport.height}
                 aria-label="Remote router browser"
+                style={{ cursor }}
                 tabIndex={0}
                 onClick={sendClick}
                 onMouseMove={sendMove}

@@ -1,6 +1,6 @@
 # Router Relay Prototype
 
-A backend-isolated remote browser for router administration. The backend opens the router in Playwright Chromium, streams JPEG frames through a CDP screencast, renders them on a canvas, and forwards mouse and keyboard input.
+A backend-isolated remote browser for router administration. The backend opens the router in Playwright Chromium, streams JPEG frames through a CDP screencast, renders them on a canvas, and forwards mouse and keyboard input. The canvas mirrors the cursor style of the remote page under the pointer.
 
 ## Run locally
 

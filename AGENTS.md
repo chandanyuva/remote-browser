@@ -253,6 +253,7 @@ Where:
 * canvas dimensions match the backend browser viewport
 * CSS scales the canvas for display
 * mouse coordinates are translated back to viewport coordinates
+* the backend reports the computed cursor style under the pointer so the canvas can mirror it
 
 ---
 

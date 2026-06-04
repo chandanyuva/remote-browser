@@ -58,7 +58,12 @@ io.on('connection', (socket) => {
   });
 
   socket.on('mouse-click', ({ x, y } = {}) => handle(socket, () => manager.click(socket.id, x, y)));
-  socket.on('mouse-move', ({ x, y } = {}) => handle(socket, () => manager.move(socket.id, x, y)));
+  socket.on('mouse-move', ({ x, y } = {}) =>
+    handle(socket, async () => {
+      const cursor = await manager.move(socket.id, x, y);
+      socket.emit('cursor-style', cursor);
+    })
+  );
   socket.on('keydown', ({ key } = {}) => handle(socket, () => manager.keyDown(socket.id, key)));
   socket.on('keyup', ({ key } = {}) => handle(socket, () => manager.keyUp(socket.id, key)));
 
