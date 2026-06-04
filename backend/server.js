@@ -8,7 +8,6 @@ import { BrowserManager } from './browserManager.js';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT) || 3001;
 const manager = new BrowserManager({
-  frameInterval: Number(process.env.FRAME_INTERVAL_MS) || 150,
   jpegQuality: Number(process.env.JPEG_QUALITY) || 55,
   headless: process.env.HEADLESS !== 'false'
 });
@@ -34,13 +33,21 @@ io.on('connection', (socket) => {
 
   socket.on('session-create', async ({ url } = {}) => {
     await handle(socket, async () => {
+      let sessionReady = false;
+      let pendingFrame = null;
       const state = await manager.create(
         socket.id,
         url,
-        (frame) => socket.emit('frame', frame),
+        (frame, metadata) => {
+          const payload = { image: frame, metadata };
+          if (sessionReady) socket.emit('frame', payload);
+          else pendingFrame = payload;
+        },
         (status) => socket.emit('page-status', status)
       );
       io.emit('session-state', state);
+      sessionReady = true;
+      if (pendingFrame) socket.emit('frame', pendingFrame);
     });
   });
 

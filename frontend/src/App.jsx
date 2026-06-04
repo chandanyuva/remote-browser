@@ -8,11 +8,13 @@ export default function App() {
   const [session, setSession] = useState(EMPTY_SESSION);
   const [url, setUrl] = useState('http://192.168.1.1');
   const [pageStatus, setPageStatus] = useState({ title: '', url: '' });
-  const [frameUrl, setFrameUrl] = useState('');
+  const [hasFrame, setHasFrame] = useState(false);
   const [error, setError] = useState('');
   const [starting, setStarting] = useState(false);
-  const frameRef = useRef('');
-  const imageRef = useRef(null);
+  const canvasRef = useRef(null);
+  const frameGenerationRef = useRef(0);
+  const pendingFrameRef = useRef(null);
+  const decodingFrameRef = useRef(false);
 
   const ownsSession = session.active && session.ownerId === socket.id;
 
@@ -27,12 +29,32 @@ export default function App() {
       setStarting(false);
       if (!next.active) {
         setPageStatus({ title: '', url: '' });
-        replaceFrame('');
+        clearFrame();
       }
     };
-    const onFrame = (data) => {
-      const blob = new Blob([data], { type: 'image/jpeg' });
-      replaceFrame(URL.createObjectURL(blob));
+    const drawNextFrame = async () => {
+      if (decodingFrameRef.current || !pendingFrameRef.current) return;
+
+      const image = pendingFrameRef.current;
+      const generation = frameGenerationRef.current;
+      pendingFrameRef.current = null;
+      decodingFrameRef.current = true;
+      const bitmap = await createImageBitmap(new Blob([image], { type: 'image/jpeg' })).catch(() => null);
+      if (bitmap) {
+        const canvas = canvasRef.current;
+        const context = canvas?.getContext('2d');
+        if (generation === frameGenerationRef.current && canvas && context) {
+          context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+          setHasFrame(true);
+        }
+        bitmap.close();
+      }
+      decodingFrameRef.current = false;
+      drawNextFrame();
+    };
+    const onFrame = ({ image }) => {
+      pendingFrameRef.current = image;
+      drawNextFrame();
     };
     const onPageStatus = (status) => {
       setPageStatus((current) => ({ ...current, ...status }));
@@ -43,10 +65,12 @@ export default function App() {
       setError(message);
       setStarting(false);
     };
-    const replaceFrame = (next) => {
-      if (frameRef.current) URL.revokeObjectURL(frameRef.current);
-      frameRef.current = next;
-      setFrameUrl(next);
+    const clearFrame = () => {
+      frameGenerationRef.current += 1;
+      pendingFrameRef.current = null;
+      const canvas = canvasRef.current;
+      canvas?.getContext('2d')?.clearRect(0, 0, canvas.width, canvas.height);
+      setHasFrame(false);
     };
 
     socket.on('connect', onConnect);
@@ -63,7 +87,8 @@ export default function App() {
       socket.off('frame', onFrame);
       socket.off('page-status', onPageStatus);
       socket.off('error-message', onError);
-      if (frameRef.current) URL.revokeObjectURL(frameRef.current);
+      frameGenerationRef.current += 1;
+      pendingFrameRef.current = null;
     };
   }, []);
 
@@ -79,7 +104,7 @@ export default function App() {
   }
 
   function coordinates(event) {
-    const rect = imageRef.current.getBoundingClientRect();
+    const rect = canvasRef.current.getBoundingClientRect();
     return {
       x: ((event.clientX - rect.left) / rect.width) * session.viewport.width,
       y: ((event.clientY - rect.top) / rect.height) * session.viewport.height
@@ -89,7 +114,7 @@ export default function App() {
   function sendClick(event) {
     if (!ownsSession) return;
     socket.emit('mouse-click', coordinates(event));
-    imageRef.current?.focus();
+    canvasRef.current?.focus();
   }
 
   function sendMove(event) {
@@ -153,11 +178,12 @@ export default function App() {
           </div>
 
           <div className="screen">
-            {frameUrl ? (
-              <img
-                ref={imageRef}
-                src={frameUrl}
-                alt="Remote router browser"
+            {session.active && ownsSession ? (
+              <canvas
+                ref={canvasRef}
+                width={session.viewport.width}
+                height={session.viewport.height}
+                aria-label="Remote router browser"
                 tabIndex={0}
                 onClick={sendClick}
                 onMouseMove={sendMove}
@@ -176,7 +202,7 @@ export default function App() {
           <footer className="statusbar">
             <span><i className={session.active ? 'active' : ''} />{session.active ? ownsSession ? 'Session active' : 'Session occupied' : 'Standing by'}</span>
             <code>{pageStatus.url || 'Backend browser disconnected'}</code>
-            <span>{frameUrl ? 'Live JPEG stream' : 'No frame data'}</span>
+            <span>{hasFrame ? 'Live CDP screencast' : 'No frame data'}</span>
           </footer>
         </section>
       </section>

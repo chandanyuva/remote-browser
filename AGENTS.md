@@ -35,8 +35,7 @@ Instead of embedding router pages using iframes or reverse proxies:
 
 * Launch Chromium on the backend
 * Open the router admin page in Chromium
-* Continuously capture screenshots
-* Stream screenshots to frontend
+* Stream JPEG frames using the Chrome DevTools Protocol screencast API
 * Send frontend mouse/keyboard events back to backend
 * Inject those events into the Playwright browser session
 
@@ -66,7 +65,7 @@ A backend-controlled browser bypasses these problems entirely.
 
 * Launch browser session
 * Navigate to router URL
-* Live screenshot streaming
+* Live CDP screencast streaming
 * Mouse click support
 * Keyboard input support
 * Single-user support
@@ -135,7 +134,7 @@ Responsible for:
 * launching Chromium
 * creating Playwright pages
 * maintaining active sessions
-* screenshot generation
+* CDP screencast frame generation
 * event injection
 * cleanup
 
@@ -195,40 +194,45 @@ Many router pages never fully finish loading.
 
 ---
 
-# Screenshot Streaming
+# CDP Screencast Streaming
 
 ## Initial Approach
 
 Use:
 
-* JPEG screenshots
+* `Page.startScreencast`
+* JPEG screencast frames
 * WebSocket transport
 
 Avoid:
 
+* screenshot polling loops
 * WebRTC
 * H264 encoding
 * GPU streaming
-* canvas rendering
 * advanced codecs
 
-Router admin pages are low-motion UIs, so screenshot streaming is sufficient.
+Router admin pages are low-motion UIs, so JPEG screencast frames are sufficient.
 
 ---
 
-# Screenshot Loop
+# Screencast Configuration
 
 Target:
 
-* 5–10 FPS initially
-* 100–200ms interval
+* acknowledge every received frame with `Page.screencastFrameAck`
+* forward binary JPEG frame data to the frontend
+* use the configured browser viewport as the maximum frame dimensions
 
 Recommended settings:
 
 ```js
-await page.screenshot({
-  type: 'jpeg',
-  quality: 50
+await cdpSession.send('Page.startScreencast', {
+  format: 'jpeg',
+  quality: 55,
+  maxWidth: 1280,
+  maxHeight: 720,
+  everyNthFrame: 1
 });
 ```
 
@@ -236,15 +240,19 @@ await page.screenshot({
 
 # Frontend Rendering
 
-Simple MVP approach:
+Decode incoming JPEG frames and draw them into a fixed-resolution canvas:
 
-```html
-<img src={frame} />
+```js
+const bitmap = await createImageBitmap(frameBlob);
+context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+bitmap.close();
 ```
 
 Where:
 
-* `frame` is updated from incoming WebSocket screenshot data
+* canvas dimensions match the backend browser viewport
+* CSS scales the canvas for display
+* mouse coordinates are translated back to viewport coordinates
 
 ---
 
@@ -338,8 +346,8 @@ navigate
 
 ## Phase 2
 
-* Screenshot streaming
-* Frontend frame rendering
+* CDP screencast streaming
+* Frontend canvas rendering
 
 ## Phase 3
 
@@ -384,7 +392,6 @@ Using Playwright automation APIs.
 # Potential Future Improvements
 
 * delta frame updates
-* canvas rendering
 * browser reuse pools
 * multi-user support
 * recording/replay

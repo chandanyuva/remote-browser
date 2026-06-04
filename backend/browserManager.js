@@ -3,16 +3,15 @@ import { chromium } from 'playwright';
 const VIEWPORT = { width: 1280, height: 720 };
 
 export class BrowserManager {
-  constructor({ frameInterval = 150, jpegQuality = 55, headless = true } = {}) {
-    this.frameInterval = frameInterval;
+  constructor({ jpegQuality = 55, headless = true } = {}) {
     this.jpegQuality = jpegQuality;
     this.headless = headless;
     this.browser = null;
     this.context = null;
     this.page = null;
     this.ownerId = null;
-    this.frameTimer = null;
-    this.capturing = false;
+    this.cdpSession = null;
+    this.screencastFrameHandler = null;
   }
 
   get state() {
@@ -54,7 +53,7 @@ export class BrowserManager {
         timeout: 30_000
       });
       await this.emitPageStatus(onStatus);
-      this.startFrames(onFrame);
+      await this.startFrames(onFrame);
       return this.state;
     } catch (error) {
       await this.close();
@@ -92,7 +91,7 @@ export class BrowserManager {
   async close(ownerId) {
     if (ownerId && this.ownerId !== ownerId) return;
 
-    this.stopFrames();
+    await this.stopFrames();
     this.page = null;
     this.ownerId = null;
 
@@ -111,28 +110,36 @@ export class BrowserManager {
     return this.page;
   }
 
-  startFrames(onFrame) {
-    this.stopFrames();
-    this.frameTimer = setInterval(async () => {
-      if (!this.page || this.capturing) return;
-      this.capturing = true;
-      try {
-        const image = await this.page.screenshot({
-          type: 'jpeg',
-          quality: this.jpegQuality
-        });
-        onFrame(image);
-      } catch {
-        // Navigation can briefly interrupt screenshots; the next frame retries.
-      } finally {
-        this.capturing = false;
-      }
-    }, this.frameInterval);
+  async startFrames(onFrame) {
+    await this.stopFrames();
+    if (!this.page || !this.context) return;
+
+    const cdpSession = await this.context.newCDPSession(this.page);
+    this.cdpSession = cdpSession;
+    this.screencastFrameHandler = ({ data, metadata, sessionId }) => {
+      cdpSession.send('Page.screencastFrameAck', { sessionId }).catch(() => {});
+      onFrame(Buffer.from(data, 'base64'), metadata);
+    };
+    cdpSession.on('Page.screencastFrame', this.screencastFrameHandler);
+    await cdpSession.send('Page.startScreencast', {
+      format: 'jpeg',
+      quality: this.jpegQuality,
+      maxWidth: VIEWPORT.width,
+      maxHeight: VIEWPORT.height,
+      everyNthFrame: 1
+    });
   }
 
-  stopFrames() {
-    clearInterval(this.frameTimer);
-    this.frameTimer = null;
+  async stopFrames() {
+    const cdpSession = this.cdpSession;
+    const frameHandler = this.screencastFrameHandler;
+    this.cdpSession = null;
+    this.screencastFrameHandler = null;
+
+    if (!cdpSession) return;
+    if (frameHandler) cdpSession.off('Page.screencastFrame', frameHandler);
+    await cdpSession.send('Page.stopScreencast').catch(() => {});
+    await cdpSession.detach().catch(() => {});
   }
 
   async emitPageStatus(onStatus) {
