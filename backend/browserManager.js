@@ -1,11 +1,13 @@
 import { chromium } from 'playwright';
 import sharp from 'sharp';
+import { createHash } from 'node:crypto';
 
 const VIEWPORT = { width: 1280, height: 720 };
 
 export class BrowserManager {
-  constructor({ screencastQuality = 75, headless = true } = {}) {
+  constructor({ screencastQuality = 75, headless = true, cdpQuality = 50 } = {}) {
     this.screencastQuality = screencastQuality;
+    this.cdpQuality = cdpQuality;
     this.headless = headless;
     this.browser = null;
     this.context = null;
@@ -13,6 +15,7 @@ export class BrowserManager {
     this.ownerId = null;
     this.cdpSession = null;
     this.screencastFrameHandler = null;
+    this.lastFrameHash = null;
   }
 
   get state() {
@@ -140,28 +143,33 @@ export class BrowserManager {
 
   async startFrames(onFrame) {
     await this.stopFrames();
+    this.lastFrameHash = null;
     if (!this.page || !this.context) return;
 
     const cdpSession = await this.context.newCDPSession(this.page);
     this.cdpSession = cdpSession;
     this.screencastFrameHandler = async ({ data, metadata, sessionId }) => {
       cdpSession.send('Page.screencastFrameAck', { sessionId }).catch(() => {});
+      const raw = Buffer.from(data, 'base64');
+      const hash = createHash('md5').update(raw).digest('base64');
+      if (hash === this.lastFrameHash) return;
+      this.lastFrameHash = hash;
       try {
-        const webp = await sharp(Buffer.from(data, 'base64'))
-          .webp({ quality: this.screencastQuality })
+        const webp = await sharp(raw)
+          .webp({ quality: this.screencastQuality, effort: 0 })
           .toBuffer();
         onFrame(webp, metadata);
       } catch {
-        onFrame(Buffer.from(data, 'base64'), metadata);
+        onFrame(raw, metadata);
       }
     };
     cdpSession.on('Page.screencastFrame', this.screencastFrameHandler);
     await cdpSession.send('Page.startScreencast', {
       format: 'jpeg',
-      quality: this.screencastQuality,
+      quality: this.cdpQuality,
       maxWidth: VIEWPORT.width,
       maxHeight: VIEWPORT.height,
-      everyNthFrame: 1
+      everyNthFrame: 2
     });
   }
 

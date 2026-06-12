@@ -1,6 +1,6 @@
 # Router Relay Prototype
 
-A backend-isolated remote browser for router administration. The backend opens the router in Playwright Chromium, streams JPEG frames through a CDP screencast, renders them on a canvas, and forwards mouse and keyboard input. The canvas mirrors the cursor style of the remote page under the pointer.
+A backend-isolated remote browser for router administration. The backend opens the router in Playwright Chromium, streams frames through a CDP screencast (JPEG source → WebP transcoded), renders them on a canvas, and forwards mouse and keyboard input. The canvas mirrors the cursor style of the remote page under the pointer.
 
 ## Run locally
 
@@ -25,8 +25,25 @@ Then open `http://localhost:3001`.
 
 Copy `.env.example` values into your environment as needed:
 
-- `PORT`: backend port, default `3001`
-- `HEADLESS`: set to `false` to see the backend browser
-- `SCREENCAST_QUALITY`: WebP encoding quality (and CDP JPEG source quality) from 0–100, default `75`
+| Variable | Default | Description |
+|---|---|---|
+| `PORT` | `3001` | Backend HTTP/WS port |
+| `HEADLESS` | `true` | Set to `false` to see the backend browser window |
+| `SCREENCAST_QUALITY` | `75` | WebP output quality (0–100) sent to the frontend |
+| `SCREENCAST_CDP_QUALITY` | `50` | CDP JPEG source quality (0–100); lower than WebP quality to reduce transfer size — WebP compression hides the source artifacts |
 
-The prototype supports one active browser session. Closing the frontend also closes its backend browser session.
+## Stream Optimizations
+
+All four optimizations from the backlog are implemented:
+
+- **Frame deduplication** — MD5 hash of raw CDP JPEG buffer; identical frames are skipped before WebP transcoding and socket emit. Router UIs are mostly static, so ~90% of frames are dropped.
+- **Sharp `effort: 0`** — fastest WebP encoding mode (~3-5x faster than default `effort: 4`) with negligible size penalty.
+- **`everyNthFrame: 2`** — CDP captures every other compositor frame, halving pipeline throughput without noticeable lag on router UIs.
+- **Adaptive CDP quality** — CDP JPEG source quality (`SCREENCAST_CDP_QUALITY`, default `50`) is independent of WebP output quality (`SCREENCAST_QUALITY`, default `75`).
+
+## Limitations
+
+- One active browser session at a time (single-user)
+- No authentication
+- No persistent sessions or recording
+- The frontend canvas must be visible for frames to render

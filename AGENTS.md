@@ -73,6 +73,46 @@ A backend-controlled browser bypasses these problems entirely.
 
 ---
 
+# Implementation Status (Phase 1–3 complete)
+
+## Backend (`backend/server.js` + `backend/browserManager.js`)
+
+| Component | Status |
+|---|---|
+| Express + Socket.IO server | ✅ Done |
+| Playwright Chromium launch (headless/headed) | ✅ Done |
+| CDP screencast (JPEG source → WebP output) | ✅ Done |
+| Mouse click / move / wheel injection | ✅ Done |
+| Keyboard down / up injection | ✅ Done |
+| Cursor style mirroring via `elementFromPoint` | ✅ Done |
+| Coordinate clamping to viewport | ✅ Done |
+| Session ownership enforcement (`ownerId`) | ✅ Done |
+| Graceful cleanup on disconnect / shutdown | ✅ Done |
+| Health endpoint (`GET /api/health`) | ✅ Done |
+| SPA fallback for static serving | ✅ Done |
+
+## Frontend (`frontend/src/App.jsx`)
+
+| Component | Status |
+|---|---|
+| Canvas frame rendering with `createImageBitmap` | ✅ Done |
+| Sequential frame decode with backpressure lock | ✅ Done |
+| Debounced mouse-move via `requestAnimationFrame` | ✅ Done |
+| Volatile emit for mouse-move (no queue buildup) | ✅ Done |
+| Coordinate scaling (display coords → viewport coords) | ✅ Done |
+| Cursor CSS mirroring on canvas | ✅ Done |
+| Session state UI (active/occupied/standing by) | ✅ Done |
+| Error display with dismiss | ✅ Done |
+
+## Stream Optimizations
+
+| Optimization | Status | Details |
+|---|---|---|
+| Frame deduplication (MD5 hash comparison) | ✅ Done | Skips WebP encode + emit for identical frames |
+| Sharp `effort: 0` | ✅ Done | Fastest WebP encoding mode |
+| `everyNthFrame: 2` | ✅ Done | Captures every other compositor frame |
+| Adaptive CDP quality | ✅ Done | CDP JPEG quality independent from WebP output quality |
+
 # Non-Goals (Later Phases)
 
 Do NOT implement initially:
@@ -418,63 +458,73 @@ Keep the architecture simple and focused.
 
 ---
 
-# Stream Optimization Backlog
+# Stream Optimizations
 
-## Frame Deduplication (highest impact)
+All optimizations in this section are implemented unless marked as backlog.
 
-Router UIs are mostly static (forms, tables, menus). Currently *every* CDP frame is processed and sent even if the page hasn't changed.
+## Completed
 
-**Approach:** Compare consecutive frames — skip encoding/sending when the page is identical.
+### Frame Deduplication (highest impact)
 
-Options for comparison:
-- **Perceptual hash (pHash):** Compute a hash of each frame, skip if hash matches previous. Fast, immune to minor JPEG noise changes.
-- **Block-level pixel diff:** Downscale frame to e.g. 16×16, compare average channel values per block.
-- **CDP metadata:** Check `metadata.pageScaleFactor`, `metadata.deviceWidth`, `metadata.scrollOffsetX/Y` — if none of these changed, the frame may be redundant.
+Router UIs are mostly static (forms, tables, menus). MD5 hash of the raw CDP JPEG buffer is computed before transcoding. If it matches the previous frame, WebP encoding and socket emit are skipped entirely.
 
-With a static router page, this should drop 90%+ of frames.
+**Implementation:** `browserManager.js:153-156` — hashes raw JPEG buffer, skips sharp + emit on match, reset on new CDP session.
 
-**Implementation notes:**
-- Track the last-sent WebP buffer or a hash of it
-- On new frame, compare hash before encoding; skip if identical
-- Optionally send a "frame-skipped" event so the frontend controls (like the frame indicator) stay accurate
-
-## Sharp Encoder Tuning
-
-Current default `effort: 4` is balanced for file size vs speed. For real-time streaming, `effort: 0` is preferred:
+### Sharp Encoder Tuning
 
 ```js
 .webp({ quality: this.screencastQuality, effort: 0 })
 ```
 
-| `effort` | Encode speed | File size vs `effort: 6` |
-|----------|-------------|--------------------------|
-| 0 | ~3-5x faster | +10-15% |
-| 4 (default) | baseline | baseline |
-| 6 | ~2x slower | -5-10% |
+`effort: 0` is ~3-5x faster than the default `effort: 4` with only +10-15% file size penalty, which is negligible for router UIs at 1-5 fps.
 
-For router UIs at 1-5 fps, `effort: 0` keeps CPU low with negligible size penalty.
-
-## Frame Throttling via CDP
-
-Current `everyNthFrame: 1` captures every compositor frame. Router UIs don't need high frame rates — `everyNthFrame: 2` or `3` halves/triples the frame pipeline throughput:
+### Frame Throttling via CDP
 
 ```js
 everyNthFrame: 2   // ~15 fps max → ~7-8 fps
 ```
 
-This directly reduces:
+Halves the pipeline throughput:
 - CDP encoding work in Chromium
 - WebP transcoding on the backend
 - Socket.IO messages sent to frontend
 - Canvas decode/draw cycles in the browser
 
-## Adaptive CDP Source Quality
+### Adaptive CDP Source Quality
 
-Since CDP JPEG is an intermediate source (transcoded to WebP before reaching the frontend), its quality can be lowered independently:
+CDP JPEG quality is independent from WebP output quality:
 
-```js
-format: 'jpeg',
-quality: 50,   // lower source quality; WebP handles the final visual
-```
+| Variable | Default | Role |
+|---|---|---|
+| `SCREENCAST_CDP_QUALITY` | `50` | CDP JPEG source (lower = smaller transfer) |
+| `SCREENCAST_QUALITY` | `75` | WebP output sent to frontend |
 
-This reduces CDP→Node transfer size and sharp decode time with no visible difference to the user (WebP compression hides the source artifacts).
+Reduces CDP→Node transfer size with no visible difference — WebP compression hides source artifacts.
+
+## Backlog (Future)
+
+### Cursor Evaluation Caching (high impact)
+
+`cursorAtPoint` calls `document.elementFromPoint` + `getComputedStyle` on **every** mouse-move (15–60 calls/sec). The pointer rarely lands on a new element between moves.
+
+**Approach:** Cache the cursor result keyed by rounded coordinates (e.g., bucket to 5px grid). Invalidate on click or after 2s. This eliminates the most expensive per-frame backend operation.
+
+### Mouse-Move Coalescing (medium impact)
+
+Multiple volatile mouse-move events can queue at the backend before one resolves. Only the last position matters.
+
+**Approach:** Debounce `page.mouse.move` + cursor eval in `server.js` so only the most recent coordinates are processed per animation frame.
+
+### Tab Visibility Pausing (medium impact)
+
+When the browser tab is hidden or the canvas is scrolled out of view, frames are still decoded and drawn.
+
+**Approach:** Use `document.visibilitychange` + `IntersectionObserver` in the frontend to skip frame processing. The backend continues producing frames, but the frontend drops them. Optionally signal the backend to reduce quality or throttle further while hidden.
+
+### Socket.IO per-message deflate (low impact)
+
+Enable `perMessageDeflate: true` on the Socket.IO server to compress text events (cursor-style, page-status, session-state) at minimal CPU cost.
+
+### Frame quality step-down on idle (low impact)
+
+If no mouse/keyboard events for N seconds, lower CDP quality or bump `everyNthFrame`. Restore on next interaction. Reduces bandwidth during viewing-only periods.

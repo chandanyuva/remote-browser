@@ -9,6 +9,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const port = Number(process.env.PORT) || 3001;
 const manager = new BrowserManager({
   screencastQuality: Number(process.env.SCREENCAST_QUALITY) || 75,
+  cdpQuality: Number(process.env.SCREENCAST_CDP_QUALITY) || 50,
   headless: process.env.HEADLESS !== 'false'
 });
 
